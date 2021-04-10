@@ -1,13 +1,14 @@
 import * as BABYLON from "babylonjs";
+import { Color3, Vector3 } from "babylonjs";
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement; // Get the canvas element
 const engine = new BABYLON.Engine(canvas, true); // Generate the BABYLON 3D engine
 
 const createScene = function () {
-  const scene = new BABYLON.Scene(engine);
+  var scene = new BABYLON.Scene(engine);
 
   // Setup environment
-  const camera = new BABYLON.ArcRotateCamera(
+  var camera = new BABYLON.ArcRotateCamera(
     "ArcRotateCamera",
     1,
     0.8,
@@ -19,7 +20,7 @@ const createScene = function () {
   scene.clearColor = new BABYLON.Color4(0.0, 0.0, 0.0, 1);
 
   // Create a particle system
-  const surfaceParticles = new BABYLON.ParticleSystem(
+  var surfaceParticles = new BABYLON.ParticleSystem(
     "surfaceParticles",
     1600,
     scene
@@ -27,20 +28,22 @@ const createScene = function () {
 
   // Texture of each particle
   surfaceParticles.particleTexture = new BABYLON.Texture(
-    "http://img1.wikia.nocookie.net/__cb20061003200043/uncyclopedia/images/4/44/White_square.png",
+    "./assets/texture/particle.png",
     scene
   );
+  const particleSystemPosition = new Vector3(0, 1, 0);
 
   // Create core sphere
-  const coreSphere = BABYLON.MeshBuilder.CreateSphere(
+  var coreSphere = BABYLON.MeshBuilder.CreateSphere(
     "coreSphere",
-    { diameter: 2.01, segments: 64 },
+    { diameter: 1.3, segments: 16 },
     scene
   );
+  coreSphere.position = particleSystemPosition;
 
   // Create core material
-  const coreMat = new BABYLON.StandardMaterial("coreMat", scene);
-  coreMat.alpha = 0;
+  var coreMat = new BABYLON.StandardMaterial("coreMat", scene);
+  coreMat.diffuseColor = new Color3(0, 0, 0);
 
   // Assign core material to sphere
   coreSphere.material = coreMat;
@@ -54,9 +57,9 @@ const createScene = function () {
   surfaceParticles.maxInitialRotation = 2 * Math.PI;
 
   // Where the sun particles come from
-  const sunEmitter = new BABYLON.SphereParticleEmitter();
+  var sunEmitter = new BABYLON.SphereParticleEmitter();
   sunEmitter.radius = 1;
-  sunEmitter.radiusRange = -1; // emit only from shape surface
+  sunEmitter.radiusRange = 0; // emit only from shape surface
 
   // Assign particles to emitters
   surfaceParticles.emitter = coreSphere; // the starting object, the emitter
@@ -67,14 +70,12 @@ const createScene = function () {
   surfaceParticles.color2 = new BABYLON.Color4(0.37, 0.37, 1);
 
   // Size of each particle
-  surfaceParticles.addSizeGradient(0, 0); //size at start of particle lifetime
-  surfaceParticles.addSizeGradient(0.25, 0.2);
-  surfaceParticles.addSizeGradient(0.75, 0.2);
-  surfaceParticles.addSizeGradient(1, 0); //size at end of particle lifetime
+  surfaceParticles.minSize = 0.01;
+  surfaceParticles.maxSize = 0.3;
 
   // Life time of each particle (random between...
   surfaceParticles.minLifeTime = 1;
-  surfaceParticles.maxLifeTime = 4;
+  surfaceParticles.maxLifeTime = 3;
 
   // Emission rate
   surfaceParticles.emitRate = 200;
@@ -82,20 +83,57 @@ const createScene = function () {
   // Blend mode : BLENDMODE_ONEONE, BLENDMODE_STANDARD, or BLENDMODE_ADD
   surfaceParticles.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
 
-  // Set the gravity of all particles
-  surfaceParticles.gravity = new BABYLON.Vector3(0, 0, 0);
-
-  // Angular speed, in radians
-  surfaceParticles.minAngularSpeed = -0.4;
-  surfaceParticles.maxAngularSpeed = 0.4;
-
-  // Speed
-  surfaceParticles.minEmitPower = -1;
-  surfaceParticles.maxEmitPower = 0;
-  surfaceParticles.updateSpeed = 0.005;
-
   // No billboard
   surfaceParticles.isBillboardBased = false;
+
+  surfaceParticles.updateFunction = function (particles) {
+    for (var index = 0; index < particles.length; index++) {
+      var particle = particles[index];
+      particle.age += this._scaledUpdateSpeed;
+
+      if (particle.age >= particle.lifeTime) {
+        // Recycle
+        particles.splice(index, 1);
+        this._stockParticles.push(particle);
+        index--;
+        continue;
+      } else {
+        // increase opacity as particle ages
+        particle.colorStep.scaleToRef(
+          this._scaledUpdateSpeed,
+          this._scaledColorStep
+        );
+        particle.color.addInPlace(this._scaledColorStep);
+
+        // calculate particle direction and speed
+        particle.angle += particle.angularSpeed * this._scaledUpdateSpeed;
+
+        particle.direction.scaleToRef(
+          this._scaledUpdateSpeed,
+          this._scaledDirection
+        );
+
+        const origin = coreSphere.position;
+        const distanceToOriginSquared = BABYLON.Vector3.DistanceSquared(
+          origin,
+          particle.position
+        );
+
+        let attractionPower = 0.005 / distanceToOriginSquared;
+        const attractionForce = origin
+          .subtract(particle.position)
+          .multiplyByFloats(attractionPower, attractionPower, attractionPower);
+
+        const swirlPower = Math.random() * 0.02;
+        const swirlForce = Vector3.Cross(
+          particle.position,
+          Vector3.Up()
+        ).multiplyByFloats(swirlPower, swirlPower, swirlPower);
+
+        particle.position.addInPlace(swirlForce.add(attractionForce));
+      }
+    }
+  };
 
   // Start the particle system
   surfaceParticles.start();
