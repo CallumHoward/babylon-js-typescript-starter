@@ -1,147 +1,95 @@
-import { GameUtils } from './game-utils';
-import * as BABYLON from 'babylonjs';
-import * as GUI from 'babylonjs-gui';
+import * as BABYLON from "babylonjs";
 
-export class Game {
+const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement; // Get the canvas element
+const engine = new BABYLON.Engine(canvas, true); // Generate the BABYLON 3D engine
 
-    private _canvas: HTMLCanvasElement;
-    private _engine: BABYLON.Engine;
-    private _scene: BABYLON.Scene;
-    private _camera: BABYLON.ArcRotateCamera;
-    private _light: BABYLON.Light;
-    private _sharkMesh: BABYLON.AbstractMesh;
-    private _sharkAnimationTime = 0;
-    private _swim: boolean = false;
-    private _txtCoordinates: { txtX: GUI.TextBlock, txtY: GUI.TextBlock, txtZ: GUI.TextBlock } = null;
+const createScene = function () {
+  // This creates a basic Babylon Scene object (non-mesh)
+  const scene = new BABYLON.Scene(engine);
+  scene.clearColor = BABYLON.Color4.FromColor3(BABYLON.Color3.Teal());
 
-    constructor(canvasElement: string) {
-        // Create canvas and engine
-        this._canvas = <HTMLCanvasElement>document.getElementById(canvasElement);
-        this._engine = new BABYLON.Engine(this._canvas, true);
-    }
+  // This creates and positions a free camera (non-mesh)
+  const camera = new BABYLON.FreeCamera(
+    "camera1",
+    new BABYLON.Vector3(0, 5, -10),
+    scene
+  );
 
-    /**
-     * Creates the BABYLONJS Scene
-     */
-    createScene(): void {
-        // create a basic BJS Scene object
-        this._scene = new BABYLON.Scene(this._engine);
-        // create a FreeCamera, and set its position to (x:0, y:5, z:-10)
-        this._camera = new BABYLON.ArcRotateCamera("Camera", 3 * Math.PI / 2, Math.PI / 4, 30, BABYLON.Vector3.Zero(), this._scene);
-        this._camera.attachControl(this._canvas, true);
-        // create a basic light, aiming 0,1,0 - meaning, to the sky
-        this._light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), this._scene);
-        // create the skybox
-        let skybox = GameUtils.createSkybox("skybox", "./assets/texture/skybox/TropicalSunnyDay", this._scene);
-        // creates the sandy ground
-        let ground = GameUtils.createGround(this._scene);
-        // creates the watermaterial and adds the relevant nodes to the renderlist
-        let waterMaterial = GameUtils.createWater(this._scene);
-        waterMaterial.addToRenderList(skybox);
-        waterMaterial.addToRenderList(ground);
-        // create a shark mesh from a .obj file
-        GameUtils.createShark(this._scene)
-            .subscribe(sharkMesh => {
-                this._sharkMesh = sharkMesh;
-                this._sharkMesh.getChildren().forEach(
-                    mesh => {
-                        waterMaterial.addToRenderList(mesh);
-                    }
-                );
-            });
-        // finally the new ui
-        let guiTexture = GameUtils.createGUI();
-        
-        // Button to start shark animation
-        GameUtils.createButtonSwim(guiTexture, "Start Swimming",
-            (btn) => {
-                let textControl = btn.children[0] as GUI.TextBlock;
-                this._swim = !this._swim;
-                if (this._swim) {
-                    textControl.text = "Stop Swimming";
-                }
-                else {
-                    this._sharkAnimationTime = 0;
-                    textControl.text = "Start Swimming";
-                }
-            });
+  // This targets the camera to scene origin
+  camera.setTarget(BABYLON.Vector3.Zero());
 
-        // Debug Text for Shark coordinates
-        this._txtCoordinates = GameUtils.createCoordinatesText(guiTexture);
+  // This attaches the camera to the canvas
+  camera.attachControl(canvas, true);
 
-        // Physics engine also works
-        let gravity = new BABYLON.Vector3(0, -0.9, 0);
-        this._scene.enablePhysics(gravity, new BABYLON.CannonJSPlugin());
-    }
+  // This creates a light, aiming 0,1,0 - to the sky (non-mesh)
+  const light = new BABYLON.HemisphericLight(
+    "light1",
+    new BABYLON.Vector3(0, 1, 0),
+    scene
+  );
 
+  // Default intensity is 1. Let's dim the light a small amount
+  light.intensity = 0.7;
 
-    /**
-     * Starts the animation loop.
-     */
-    animate(): void {
-        this._scene.registerBeforeRender(() => {
-            let deltaTime: number = (1 / this._engine.getFps());
-            this.animateShark(deltaTime);
-        });
+  // Our built-in 'sphere' shape. Params: name, subdivs, size, scene
+  const sphere = BABYLON.Mesh.CreateSphere("sphere1", 16, 2, scene);
 
-        // run the render loop
-        this._engine.runRenderLoop(() => {
-            this._scene.render();
-        });
+  // Move the sphere upward 1/2 its height
+  sphere.position.y = 1;
 
-        // the canvas/window resize event handler
-        window.addEventListener('resize', () => {
-            this._engine.resize();
-        });
-    }
+  // Our built-in 'ground' shape. Params: name, width, depth, subdivs, scene
+  const ground = BABYLON.Mesh.CreateGround("ground1", 6, 6, 2, scene);
 
-    animateShark(deltaTime: number): void {
-        this.debugFirstMeshCoordinate(this._sharkMesh as BABYLON.Mesh);
-        if (this._sharkMesh && this._swim) {
-            this._sharkAnimationTime += deltaTime;
-            this._sharkMesh.getChildren().forEach(
-                mesh => {
-                    let realMesh = <BABYLON.Mesh> mesh;
-                    let vertexData = BABYLON.VertexData.ExtractFromMesh(realMesh);
-                    let positions = vertexData.positions;
-                    let numberOfPoints = positions.length / 3;
-                    for (let i = 0; i < numberOfPoints; i++) {
-                        let vertex = new BABYLON.Vector3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
-                        vertex.x += (Math.sin(0.15 * vertex.z + this._sharkAnimationTime * 4 - 1.6) * 0.05);
-                        positions[i * 3] = vertex.x;
-                        
-                    }
-                    vertexData.applyToMesh(mesh as BABYLON.Mesh);
-                }
-            );
+  BABYLON.Effect.ShadersStore["customFragmentShader"] = `
+    #ifdef GL_ES
+        precision highp float;
+    #endif
+
+    // Samplers
+    varying vec2 vUV;
+    uniform sampler2D textureSampler;
+
+    // Parameters
+    uniform vec2 screenSize;
+    uniform float threshold;
+
+    void main(void)
+    {
+        vec2 texelSize = vec2(1.0 / screenSize.x, 1.0 / screenSize.y);
+        vec4 baseColor = texture2D(textureSampler, vUV);
+
+        if (baseColor.r < threshold) {
+            gl_FragColor = baseColor;
+        } else {
+            gl_FragColor = vec4(0);
         }
     }
+    `;
 
-    /**
-     * Prints the coordinates of the first vertex of a mesh
-     */
-    public debugFirstMeshCoordinate(mesh: BABYLON.Mesh) {
-        if(!mesh || !mesh.getChildren()) {
-            return;
-        }
-        let firstMesh = (mesh.getChildren()[0] as BABYLON.Mesh) 
-        let vertexData = BABYLON.VertexData.ExtractFromMesh(firstMesh);
-        let positions = vertexData.positions;
-        let firstVertex = new BABYLON.Vector3(positions[0], positions[1], positions[3]);
-        this.updateCoordinateTexture(firstVertex);
-    }
+  const postProcess = new BABYLON.PostProcess(
+    "My custom post process",
+    "custom",
+    ["screenSize", "threshold"],
+    null,
+    0.25,
+    camera
+  );
+  postProcess.onApply = function (effect) {
+    effect.setFloat2("screenSize", postProcess.width, postProcess.height);
+    effect.setFloat("threshold", 0.3);
+  };
 
-    /**
-     * Prints the given Vector3
-     * @param coordinates 
-     */
-    public updateCoordinateTexture(coordinates: BABYLON.Vector3) {
-        if(!coordinates) {
-            return;
-        }
-        this._txtCoordinates.txtX.text = "X: " + coordinates.x;
-        this._txtCoordinates.txtY.text = "Y: " + coordinates.y;
-        this._txtCoordinates.txtZ.text = "Z: " + coordinates.z;
-    }
+  console.log("hello");
 
-}
+  return scene;
+};
+
+export const initBabylonCanvas = () => {
+  const scene = createScene();
+  engine.runRenderLoop(() => {
+    scene.render();
+  });
+  window.addEventListener("resize", () => {
+    engine.resize();
+  });
+};
